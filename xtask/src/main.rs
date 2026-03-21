@@ -565,7 +565,8 @@ chmod 0755 "$USER_BIN_DIR/mosh-server"
 render_template "$RELEASE_ROOT/templates/moshwatchd.service" "$SYSTEMD_DIR/moshwatchd.service"
 chmod 0644 "$SYSTEMD_DIR/moshwatchd.service"
 
-cat > "$CONFIG_DIR/path.sh" <<'EOF'
+path_file="$(mktemp "$CONFIG_DIR/.path.sh.XXXXXX")"
+cat > "$path_file" <<'EOF'
 # Added by moshwatch install. Keep ~/.local/bin ahead of system PATH so SSH-launched Mosh sessions resolve the wrapper.
 if [ -d "$HOME/.local/bin" ]; then
     case ":$PATH:" in
@@ -574,6 +575,7 @@ if [ -d "$HOME/.local/bin" ]; then
     esac
 fi
 EOF
+mv "$path_file" "$CONFIG_DIR/path.sh"
 
 upsert_managed_block() {{
     local file_path="$1"
@@ -1675,6 +1677,16 @@ mod tests {
         assert!(!script.contains(
             r#"sed "s#@INSTALL_BIN_DIR@#${INSTALL_BIN_DIR}#g" "$source_file" > "$destination_file""#
         ));
+    }
+
+    #[test]
+    fn render_release_install_script_does_not_write_path_sh_through_symlink_targets() {
+        let script = render_release_install_script();
+
+        assert!(script.contains(r#"path_file="$(mktemp "$CONFIG_DIR/.path.sh.XXXXXX")""#));
+        assert!(script.contains(r#"cat > "$path_file" <<'EOF'"#));
+        assert!(script.contains(r#"mv "$path_file" "$CONFIG_DIR/path.sh""#));
+        assert!(!script.contains(r#"cat > "$CONFIG_DIR/path.sh" <<'EOF'"#));
     }
 
     #[test]

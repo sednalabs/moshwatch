@@ -222,6 +222,7 @@ fn accept_header_preference(value: &str) -> AcceptPreference {
 
 const PROMETHEUS_TEXT_VERSION: &str = "0.0.4";
 const OPENMETRICS_TEXT_VERSION: &str = "1.0.0";
+const METRICS_TEXT_CHARSET: &str = "utf-8";
 
 fn accept_item_quality(
     item: &str,
@@ -237,9 +238,10 @@ fn accept_item_quality(
 
     let mut quality = 1.0_f32;
     let mut version = None;
+    let mut charset = None;
     for parameter in parts {
         let Some((name, raw_value)) = parameter.split_once('=') else {
-            continue;
+            return None;
         };
         let name = name.trim();
         let value = raw_value.trim().trim_matches('"');
@@ -255,11 +257,22 @@ fn accept_item_quality(
         }
         if name.eq_ignore_ascii_case("version") {
             version = Some(value);
+            continue;
         }
+        if name.eq_ignore_ascii_case("charset") {
+            charset = Some(value);
+            continue;
+        }
+        return None;
     }
 
     if let Some(version) = version
         && version != expected_version
+    {
+        return None;
+    }
+    if let Some(charset) = charset
+        && !charset.eq_ignore_ascii_case(METRICS_TEXT_CHARSET)
     {
         return None;
     }
@@ -1790,6 +1803,27 @@ mod tests {
     #[test]
     fn q_zero_for_both_supported_metrics_formats_is_not_acceptable() {
         let request = "GET /metrics HTTP/1.1\r\nHost: localhost\r\nAccept: application/openmetrics-text; q=0, text/plain; q=0\r\n\r\n";
+        assert_eq!(requested_metrics_format(request), None);
+    }
+
+    #[test]
+    fn prometheus_accept_utf8_charset_remains_acceptable() {
+        let request = "GET /metrics HTTP/1.1\r\nHost: localhost\r\nAccept: text/plain; version=0.0.4; charset=utf-8\r\n\r\n";
+        assert_eq!(
+            requested_metrics_format(request),
+            Some(MetricsTextFormat::PrometheusText)
+        );
+    }
+
+    #[test]
+    fn prometheus_accept_non_utf8_charset_is_not_acceptable() {
+        let request = "GET /metrics HTTP/1.1\r\nHost: localhost\r\nAccept: text/plain; version=0.0.4; charset=us-ascii\r\n\r\n";
+        assert_eq!(requested_metrics_format(request), None);
+    }
+
+    #[test]
+    fn openmetrics_accept_non_utf8_charset_is_not_acceptable() {
+        let request = "GET /metrics HTTP/1.1\r\nHost: localhost\r\nAccept: application/openmetrics-text; version=1.0.0; charset=us-ascii\r\n\r\n";
         assert_eq!(requested_metrics_format(request), None);
     }
 
