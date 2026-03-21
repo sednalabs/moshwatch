@@ -240,9 +240,7 @@ fn accept_item_quality(
     let mut version = None;
     let mut charset = None;
     for parameter in parts {
-        let Some((name, raw_value)) = parameter.split_once('=') else {
-            return None;
-        };
+        let (name, raw_value) = parameter.split_once('=')?;
         let name = name.trim();
         let value = raw_value.trim().trim_matches('"');
         if name.eq_ignore_ascii_case("q") {
