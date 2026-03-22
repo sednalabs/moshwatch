@@ -261,7 +261,9 @@ fn accept_item_quality(
             charset = Some(value);
             continue;
         }
-        return None;
+        // Ignore unknown media-type extension parameters. They should not make
+        // an otherwise compatible media range unacceptable.
+        continue;
     }
 
     if let Some(version) = version
@@ -1823,6 +1825,24 @@ mod tests {
     fn openmetrics_accept_non_utf8_charset_is_not_acceptable() {
         let request = "GET /metrics HTTP/1.1\r\nHost: localhost\r\nAccept: application/openmetrics-text; version=1.0.0; charset=us-ascii\r\n\r\n";
         assert_eq!(requested_metrics_format(request), None);
+    }
+
+    #[test]
+    fn prometheus_accept_unknown_extension_parameter_remains_acceptable() {
+        let request = "GET /metrics HTTP/1.1\r\nHost: localhost\r\nAccept: text/plain; version=0.0.4; escaping=allow-utf-8\r\n\r\n";
+        assert_eq!(
+            requested_metrics_format(request),
+            Some(MetricsTextFormat::PrometheusText)
+        );
+    }
+
+    #[test]
+    fn openmetrics_accept_unknown_extension_parameter_remains_acceptable() {
+        let request = "GET /metrics HTTP/1.1\r\nHost: localhost\r\nAccept: application/openmetrics-text; version=1.0.0; escaping=allow-utf-8\r\n\r\n";
+        assert_eq!(
+            requested_metrics_format(request),
+            Some(MetricsTextFormat::OpenMetricsText)
+        );
     }
 
     #[test]
