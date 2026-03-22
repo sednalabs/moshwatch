@@ -554,8 +554,11 @@ render_template() {{
     local source_file="$1"
     local destination_file="$2"
     local rendered_file
+    local line
     rendered_file="$(mktemp "$(dirname -- "$destination_file")/.${{destination_file##*/}}.XXXXXX")"
-    sed "s#@INSTALL_BIN_DIR@#${{INSTALL_BIN_DIR}}#g" "$source_file" > "$rendered_file"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        printf '%s\n' "${{line//@INSTALL_BIN_DIR@/${{INSTALL_BIN_DIR}}}}"
+    done < "$source_file" > "$rendered_file"
     mv "$rendered_file" "$destination_file"
 }}
 
@@ -1667,16 +1670,17 @@ mod tests {
         let script = render_release_install_script();
 
         assert!(script.contains("local rendered_file"));
+        assert!(script.contains("local line"));
         assert!(script.contains(
             r#"rendered_file="$(mktemp "$(dirname -- "$destination_file")/.${destination_file##*/}.XXXXXX")""#
         ));
+        assert!(script.contains(r#"while IFS= read -r line || [[ -n "$line" ]]; do"#));
         assert!(script.contains(
-            r#"sed "s#@INSTALL_BIN_DIR@#${INSTALL_BIN_DIR}#g" "$source_file" > "$rendered_file""#
+            r#"printf '%s\n' "${line//@INSTALL_BIN_DIR@/${INSTALL_BIN_DIR}}""#
         ));
+        assert!(script.contains(r#"done < "$source_file" > "$rendered_file""#));
         assert!(script.contains(r#"mv "$rendered_file" "$destination_file""#));
-        assert!(!script.contains(
-            r#"sed "s#@INSTALL_BIN_DIR@#${INSTALL_BIN_DIR}#g" "$source_file" > "$destination_file""#
-        ));
+        assert!(!script.contains(r#"sed "s#@INSTALL_BIN_DIR@#${INSTALL_BIN_DIR}#g""#));
     }
 
     #[test]
