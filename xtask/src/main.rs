@@ -78,21 +78,50 @@ fn main() -> Result<()> {
         }
         "install-service" => install_service(),
         "install-shell-integration" => install_shell_integration(),
-        "package-release" => package_release(parse_package_release_tag(args)?),
+        "package-release" => package_release(parse_package_release_args(args)?),
         "sync-observability-docs" => sync_observability_docs(false),
         "check-observability-docs" => sync_observability_docs(true),
         "validate-observability-assets" => validate_observability_assets(),
         _ => {
             eprintln!(
-                "usage: cargo run -p xtask -- <build|install|install-artifacts|install-wrapper|install-service|install-shell-integration|package-release [--tag <tag>]|sync-observability-docs|check-observability-docs|validate-observability-assets>"
+                "usage: cargo run -p xtask -- <build|install|install-artifacts|install-wrapper|install-service|install-shell-integration|package-release [--tag <tag>] [--target-os <os>] [--target-arch <arch>]|sync-observability-docs|check-observability-docs|validate-observability-assets>"
             );
             Ok(())
         }
     }
 }
 
-fn parse_package_release_tag(mut args: impl Iterator<Item = String>) -> Result<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReleaseTarget {
+    os: String,
+    arch: String,
+}
+
+impl ReleaseTarget {
+    fn default_release() -> Self {
+        Self {
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+        }
+    }
+
+    fn artifact_suffix(&self) -> String {
+        format!("{}-{}", self.os, self.arch)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PackageReleaseArgs {
+    tag: String,
+    target: ReleaseTarget,
+}
+
+fn parse_package_release_args(
+    mut args: impl Iterator<Item = String>,
+) -> Result<PackageReleaseArgs> {
     let mut tag = None;
+    let mut target_os = None;
+    let mut target_arch = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--tag" => {
@@ -102,13 +131,50 @@ fn parse_package_release_tag(mut args: impl Iterator<Item = String>) -> Result<S
             value if value.starts_with("--tag=") => {
                 tag = Some(value.trim_start_matches("--tag=").to_string());
             }
+            "--target-os" => {
+                let value = args
+                    .next()
+                    .context("--target-os requires an operating system value")?;
+                target_os = Some(value);
+            }
+            value if value.starts_with("--target-os=") => {
+                target_os = Some(value.trim_start_matches("--target-os=").to_string());
+            }
+            "--target-arch" => {
+                let value = args
+                    .next()
+                    .context("--target-arch requires an architecture value")?;
+                target_arch = Some(value);
+            }
+            value if value.starts_with("--target-arch=") => {
+                target_arch = Some(value.trim_start_matches("--target-arch=").to_string());
+            }
             "-h" | "--help" => {
-                anyhow::bail!("usage: cargo run -p xtask -- package-release [--tag <tag>]");
+                anyhow::bail!(
+                    "usage: cargo run -p xtask -- package-release [--tag <tag>] [--target-os <os>] [--target-arch <arch>]"
+                );
             }
             unexpected => anyhow::bail!("unexpected argument {unexpected}"),
         }
     }
-    Ok(tag.unwrap_or_else(expected_release_tag))
+    let mut target = ReleaseTarget::default_release();
+    if let Some(value) = target_os {
+        target.os = value;
+    }
+    if let Some(value) = target_arch {
+        target.arch = value;
+    }
+
+    anyhow::ensure!(!target.os.trim().is_empty(), "--target-os cannot be empty");
+    anyhow::ensure!(
+        !target.arch.trim().is_empty(),
+        "--target-arch cannot be empty"
+    );
+
+    Ok(PackageReleaseArgs {
+        tag: tag.unwrap_or_else(expected_release_tag),
+        target,
+    })
 }
 
 fn expected_release_tag() -> String {
@@ -218,19 +284,20 @@ fn build_all(root: &Path, source_date_epoch: u64) -> Result<()> {
     Ok(())
 }
 
-fn package_release(tag: String) -> Result<()> {
-    ensure_release_platform()?;
+fn package_release(args: PackageReleaseArgs) -> Result<()> {
+    ensure_release_platform(&args.target)?;
     let expected_tag = expected_release_tag();
     anyhow::ensure!(
-        tag == expected_tag,
-        "release tag {tag} does not match workspace version tag {expected_tag}"
+        args.tag == expected_tag,
+        "release tag {} does not match workspace version tag {expected_tag}",
+        args.tag
     );
 
     let root = repo_root()?;
-    let source_ref = resolve_release_source_ref(&root, &tag)?;
+    let source_ref = resolve_release_source_ref(&root, &args.tag)?;
     let source_metadata = resolve_source_metadata(&root, &source_ref)?;
     let vendor_build_env = vendored_build_environment(source_metadata.source_date_epoch);
-    let artifact_paths = release_artifact_paths(&root, &tag);
+    let artifact_paths = release_artifact_paths(&root, &args.tag, &args.target);
 
     build_all(&root, source_metadata.source_date_epoch)?;
     stage_release_tree(&root, &artifact_paths.stage_dir)?;
@@ -238,7 +305,7 @@ fn package_release(tag: String) -> Result<()> {
     write_mosh_server_build_info(
         &artifact_paths.build_info_json,
         &MoshServerBuildInfo {
-            release_tag: tag.clone(),
+            release_tag: args.tag.clone(),
             source_ref: source_metadata.source_ref.clone(),
             source_commit: source_metadata.source_commit.clone(),
             source_commit_unix_ts: source_metadata.source_commit_unix_ts,
@@ -259,7 +326,12 @@ fn package_release(tag: String) -> Result<()> {
         &artifact_paths.binary_tarball,
         source_metadata.source_date_epoch,
     )?;
-    write_source_archive(&root, &tag, &source_ref, &artifact_paths.source_tarball)?;
+    write_source_archive(
+        &root,
+        &args.tag,
+        &source_ref,
+        &artifact_paths.source_tarball,
+    )?;
     write_sha256_sums(
         &artifact_paths.sha256_sums,
         &[
@@ -277,10 +349,14 @@ fn package_release(tag: String) -> Result<()> {
     Ok(())
 }
 
-fn ensure_release_platform() -> Result<()> {
+fn ensure_release_platform(target: &ReleaseTarget) -> Result<()> {
+    let host_os = env::consts::OS;
+    let host_arch = env::consts::ARCH;
     anyhow::ensure!(
-        cfg!(target_os = "linux") && cfg!(target_arch = "x86_64"),
-        "package-release is only supported on Linux x86_64"
+        target.os == host_os && target.arch == host_arch,
+        "package-release target {}-{} is not supported on host {host_os}-{host_arch}",
+        target.os,
+        target.arch
     );
     Ok(())
 }
@@ -391,13 +467,14 @@ struct ReleaseArtifactPaths {
     build_info_json: PathBuf,
 }
 
-fn release_artifact_paths(root: &Path, tag: &str) -> ReleaseArtifactPaths {
+fn release_artifact_paths(root: &Path, tag: &str, target: &ReleaseTarget) -> ReleaseArtifactPaths {
     let release_dir = root.join("dist/release");
-    let stage_dir = release_dir.join(format!("moshwatch-{tag}-linux-x86_64"));
+    let target_suffix = target.artifact_suffix();
+    let stage_dir = release_dir.join(format!("moshwatch-{tag}-{target_suffix}"));
     ReleaseArtifactPaths {
         release_dir: release_dir.clone(),
         stage_dir: stage_dir.clone(),
-        binary_tarball: release_dir.join(format!("moshwatch-{tag}-linux-x86_64.tar.gz")),
+        binary_tarball: release_dir.join(format!("moshwatch-{tag}-{target_suffix}.tar.gz")),
         source_tarball: release_dir.join(format!("moshwatch-{tag}-source.tar.gz")),
         sha256_sums: release_dir.join("SHA256SUMS"),
         build_info_json: release_dir
@@ -431,7 +508,7 @@ fn stage_release_tree(root: &Path, stage_dir: &Path) -> Result<()> {
 
     install_text_file(
         &stage_dir.join("install.sh"),
-        &render_release_install_script(),
+        &render_release_install_script()?,
         0o755,
     )
     .context("stage release installer")?;
@@ -527,149 +604,15 @@ fn write_mosh_server_build_info(destination: &Path, info: &MoshServerBuildInfo) 
     install_text_file(destination, &(body + "\n"), 0o644)
 }
 
-fn render_release_install_script() -> String {
-    format!(
-        r#"#!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
-
-set -euo pipefail
-
-PATH_BLOCK_START='{path_block_start}'
-PATH_BLOCK_END='{path_block_end}'
-
-RELEASE_ROOT="$(CDPATH= cd -- "$(dirname -- "${{BASH_SOURCE[0]}}")" && pwd)"
-INSTALL_BIN_DIR="$HOME/.local/share/moshwatch/bin"
-USER_BIN_DIR="$HOME/.local/bin"
-CONFIG_DIR="$HOME/.config/moshwatch"
-SYSTEMD_DIR="$HOME/.config/systemd/user"
-
-mkdir -p "$INSTALL_BIN_DIR" "$USER_BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR"
-
-install -m 0755 "$RELEASE_ROOT/bin/mosh-server-real" "$INSTALL_BIN_DIR/mosh-server-real"
-install -m 0755 "$RELEASE_ROOT/bin/moshwatchd" "$INSTALL_BIN_DIR/moshwatchd"
-install -m 0755 "$RELEASE_ROOT/bin/moshwatch" "$INSTALL_BIN_DIR/moshwatch"
-install -m 0755 "$RELEASE_ROOT/bin/moshwatch" "$USER_BIN_DIR/moshwatch"
-
-render_template() {{
-    local source_file="$1"
-    local destination_file="$2"
-    local rendered_file
-    local line
-    rendered_file="$(mktemp "$(dirname -- "$destination_file")/.${{destination_file##*/}}.XXXXXX")"
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        printf '%s\n' "${{line//@INSTALL_BIN_DIR@/${{INSTALL_BIN_DIR}}}}"
-    done < "$source_file" > "$rendered_file"
-    mv "$rendered_file" "$destination_file"
-}}
-
-render_template "$RELEASE_ROOT/templates/mosh-server-wrapper.sh" "$USER_BIN_DIR/mosh-server"
-chmod 0755 "$USER_BIN_DIR/mosh-server"
-
-render_template "$RELEASE_ROOT/templates/moshwatchd.service" "$SYSTEMD_DIR/moshwatchd.service"
-chmod 0644 "$SYSTEMD_DIR/moshwatchd.service"
-
-path_file="$(mktemp "$CONFIG_DIR/.path.sh.XXXXXX")"
-cat > "$path_file" <<'EOF'
-# Added by moshwatch install. Keep ~/.local/bin ahead of system PATH so SSH-launched Mosh sessions resolve the wrapper.
-if [ -d "$HOME/.local/bin" ]; then
-    case ":$PATH:" in
-        *":$HOME/.local/bin:"*) ;;
-        *) PATH="$HOME/.local/bin:$PATH" ;;
-    esac
-fi
-EOF
-mv "$path_file" "$CONFIG_DIR/path.sh"
-
-upsert_managed_block() {{
-    local file_path="$1"
-    local placement="$2"
-    local tmp_file
-    local next_file
-    tmp_file="$(mktemp "$(dirname -- "$file_path")/.${{file_path##*/}}.XXXXXX")"
-    next_file="$(mktemp "$(dirname -- "$file_path")/.${{file_path##*/}}.next.XXXXXX")"
-
-    if [[ -f "$file_path" ]]; then
-        awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
-            BEGIN {{ skipping = 0; buffered_lines = 0 }}
-            !skipping && $0 == start {{
-                skipping = 1
-                buffered_lines = 0
-                buffered[buffered_lines++] = $0
-                next
-            }}
-            skipping {{
-                buffered[buffered_lines++] = $0
-                if ($0 == end) {{
-                    skipping = 0
-                    buffered_lines = 0
-                }}
-                next
-            }}
-            {{ print }}
-            END {{
-                if (skipping) {{
-                    for (idx = 0; idx < buffered_lines; idx++) {{
-                        print buffered[idx]
-                    }}
-                }}
-            }}
-        ' "$file_path" > "$tmp_file"
-    else
-        : > "$tmp_file"
-    fi
-
-    if [[ "$placement" == "prepend" ]]; then
-        if [[ -s "$tmp_file" ]]; then
-            {{
-                printf '%s\n' "$PATH_BLOCK_START"
-                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
-                printf '%s\n' "$PATH_BLOCK_END"
-                printf '\n'
-                cat "$tmp_file"
-            }} > "$next_file"
-        else
-            {{
-                printf '%s\n' "$PATH_BLOCK_START"
-                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
-                printf '%s\n' "$PATH_BLOCK_END"
-            }} > "$next_file"
-        fi
-    else
-        if [[ -s "$tmp_file" ]]; then
-            {{
-                cat "$tmp_file"
-                printf '\n'
-                printf '%s\n' "$PATH_BLOCK_START"
-                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
-                printf '%s\n' "$PATH_BLOCK_END"
-            }} > "$next_file"
-        else
-            {{
-                printf '%s\n' "$PATH_BLOCK_START"
-                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
-                printf '%s\n' "$PATH_BLOCK_END"
-            }} > "$next_file"
-        fi
-    fi
-
-    if [[ -L "$file_path" ]]; then
-        # Write through the managed path so symlinked rc files keep the link itself.
-        cat "$next_file" > "$file_path"
-    else
-        mv "$next_file" "$file_path"
-    fi
-    rm -f "$tmp_file" "$next_file"
-}}
-
-upsert_managed_block "$HOME/.bashrc" prepend
-upsert_managed_block "$HOME/.profile" append
-
-systemctl --user daemon-reload
-systemctl --user enable moshwatchd.service
-systemctl --user restart moshwatchd.service
-"#,
-        path_block_start = PATH_BLOCK_START,
-        path_block_end = PATH_BLOCK_END
+fn render_release_install_script() -> Result<String> {
+    render_template(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("templates")
+            .join("release-install.sh.template"),
+        &[
+            ("@PATH_BLOCK_START@", PATH_BLOCK_START.to_string()),
+            ("@PATH_BLOCK_END@", PATH_BLOCK_END.to_string()),
+        ],
     )
 }
 
@@ -1580,12 +1523,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        MoshServerBuildInfo, PATH_BLOCK_END, PATH_BLOCK_START, Placement, install_binary,
-        install_text_file, local_build_source_date_epoch_from, release_artifact_paths,
-        render_release_install_script, render_template, sha256_hex, stage_release_tree,
-        strip_managed_block, tool_command_from_environment, upsert_managed_block,
-        validate_release_tree, vendored_build_environment_from, write_binary_archive,
-        write_mosh_server_build_info, write_sha256_sums,
+        MoshServerBuildInfo, PATH_BLOCK_END, PATH_BLOCK_START, Placement, ReleaseTarget,
+        install_binary, install_text_file, local_build_source_date_epoch_from,
+        parse_package_release_args, release_artifact_paths, render_release_install_script,
+        render_template, sha256_hex, stage_release_tree, strip_managed_block,
+        tool_command_from_environment, upsert_managed_block, validate_release_tree,
+        vendored_build_environment_from, write_binary_archive, write_mosh_server_build_info,
+        write_sha256_sums,
     };
 
     #[test]
@@ -1650,7 +1594,7 @@ mod tests {
 
     #[test]
     fn render_release_install_script_preserves_symlinked_rc_files() {
-        let script = render_release_install_script();
+        let script = render_release_install_script().expect("render release install script");
 
         assert!(script.contains("local next_file"));
         assert!(script.contains(
@@ -1667,7 +1611,7 @@ mod tests {
 
     #[test]
     fn render_release_install_script_does_not_render_templates_through_symlinks() {
-        let script = render_release_install_script();
+        let script = render_release_install_script().expect("render release install script");
 
         assert!(script.contains("local rendered_file"));
         assert!(script.contains("local line"));
@@ -1675,9 +1619,9 @@ mod tests {
             r#"rendered_file="$(mktemp "$(dirname -- "$destination_file")/.${destination_file##*/}.XXXXXX")""#
         ));
         assert!(script.contains(r#"while IFS= read -r line || [[ -n "$line" ]]; do"#));
-        assert!(script.contains(
-            r#"printf '%s\n' "${line//@INSTALL_BIN_DIR@/${INSTALL_BIN_DIR}}""#
-        ));
+        assert!(
+            script.contains(r#"printf '%s\n' "${line//@INSTALL_BIN_DIR@/${INSTALL_BIN_DIR}}""#)
+        );
         assert!(script.contains(r#"done < "$source_file" > "$rendered_file""#));
         assert!(script.contains(r#"mv "$rendered_file" "$destination_file""#));
         assert!(!script.contains(r#"sed "s#@INSTALL_BIN_DIR@#${INSTALL_BIN_DIR}#g""#));
@@ -1685,12 +1629,22 @@ mod tests {
 
     #[test]
     fn render_release_install_script_does_not_write_path_sh_through_symlink_targets() {
-        let script = render_release_install_script();
+        let script = render_release_install_script().expect("render release install script");
 
         assert!(script.contains(r#"path_file="$(mktemp "$CONFIG_DIR/.path.sh.XXXXXX")""#));
         assert!(script.contains(r#"cat > "$path_file" <<'EOF'"#));
         assert!(script.contains(r#"mv "$path_file" "$CONFIG_DIR/path.sh""#));
         assert!(!script.contains(r#"cat > "$CONFIG_DIR/path.sh" <<'EOF'"#));
+    }
+
+    #[test]
+    fn render_release_install_script_replaces_path_block_placeholders() {
+        let script = render_release_install_script().expect("render release install script");
+
+        assert!(script.contains(PATH_BLOCK_START));
+        assert!(script.contains(PATH_BLOCK_END));
+        assert!(!script.contains("@PATH_BLOCK_START@"));
+        assert!(!script.contains("@PATH_BLOCK_END@"));
     }
 
     #[test]
@@ -1751,7 +1705,7 @@ mod tests {
     #[test]
     fn release_artifact_paths_follow_expected_layout() {
         let root = Path::new("/tmp/moshwatch");
-        let paths = release_artifact_paths(root, "v1.2.3");
+        let paths = release_artifact_paths(root, "v1.2.3", &ReleaseTarget::default_release());
 
         assert_eq!(paths.release_dir, root.join("dist/release"));
         assert_eq!(
@@ -1770,6 +1724,58 @@ mod tests {
         assert_eq!(
             paths.build_info_json,
             root.join("dist/release/moshwatch-v1.2.3-mosh-server-real-build-info.json")
+        );
+    }
+
+    #[test]
+    fn release_artifact_paths_include_custom_target_suffix() {
+        let root = Path::new("/tmp/moshwatch");
+        let target = ReleaseTarget {
+            os: "linux".to_string(),
+            arch: "aarch64".to_string(),
+        };
+        let paths = release_artifact_paths(root, "v1.2.3", &target);
+
+        assert_eq!(
+            paths.stage_dir,
+            root.join("dist/release/moshwatch-v1.2.3-linux-aarch64")
+        );
+        assert_eq!(
+            paths.binary_tarball,
+            root.join("dist/release/moshwatch-v1.2.3-linux-aarch64.tar.gz")
+        );
+    }
+
+    #[test]
+    fn parse_package_release_args_defaults_target_to_linux_x86_64() {
+        let args = parse_package_release_args(["--tag", "v1.2.3"].into_iter().map(str::to_string))
+            .expect("parse package release args");
+
+        assert_eq!(args.tag, "v1.2.3");
+        assert_eq!(args.target, ReleaseTarget::default_release());
+    }
+
+    #[test]
+    fn parse_package_release_args_accepts_target_overrides() {
+        let args = parse_package_release_args(
+            [
+                "--tag=v1.2.3",
+                "--target-os=linux",
+                "--target-arch",
+                "aarch64",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .expect("parse package release args");
+
+        assert_eq!(args.tag, "v1.2.3");
+        assert_eq!(
+            args.target,
+            ReleaseTarget {
+                os: "linux".to_string(),
+                arch: "aarch64".to_string(),
+            }
         );
     }
 
@@ -2112,7 +2118,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(stage_dir.join("install.sh")).expect("read staged installer"),
-            render_release_install_script()
+            render_release_install_script().expect("render release install script")
         );
         let install_mode = fs::metadata(stage_dir.join("install.sh"))
             .expect("stat installer")
