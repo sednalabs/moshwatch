@@ -1166,19 +1166,22 @@ fn upsert_managed_block(path: &Path, block: &str, placement: Placement) -> Resul
 }
 
 fn install_text_file_through_symlink(destination: &Path, contents: &str, mode: u32) -> Result<()> {
-    // Follow the symlink target instead of renaming over the symlink so dotfile
-    // managers such as Stow or chezmoi keep control of the link itself.
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(destination)
-        .with_context(|| format!("open {}", destination.display()))?;
-    file.write_all(contents.as_bytes())
-        .with_context(|| format!("write {}", destination.display()))?;
-    file.flush()
-        .with_context(|| format!("flush {}", destination.display()))?;
-    set_mode_if_unix(destination, mode)
+    // Resolve one hop so we can preserve the symlink path itself while still
+    // using the same atomic temp-file + rename flow for the target contents.
+    let target = resolve_symlink_target_path(destination)?;
+    install_text_file(&target, contents, mode)
+}
+
+fn resolve_symlink_target_path(path: &Path) -> Result<PathBuf> {
+    let target =
+        fs::read_link(path).with_context(|| format!("read symlink target {}", path.display()))?;
+    if target.is_absolute() {
+        return Ok(target);
+    }
+    let base = path
+        .parent()
+        .with_context(|| format!("determine parent for {}", path.display()))?;
+    Ok(base.join(target))
 }
 
 fn strip_managed_block(contents: &str) -> String {
@@ -1343,6 +1346,8 @@ fn validate_observability_assets() -> Result<()> {
             .arg("test")
             .arg("rules")
             .arg(root.join("examples/observability/prometheus/tests/moshwatch.rules.test.yml")))?;
+    } else if env::var_os("CI").is_some() {
+        anyhow::bail!("promtool not found in CI; cannot run Prometheus rules validation");
     } else {
         eprintln!("warning: promtool not found; skipping Prometheus semantic validation");
     }
