@@ -418,11 +418,17 @@ impl AppConfig {
             anyhow::bail!("metrics.prometheus.listen_addr cannot be empty when provided");
         }
         if self.metrics.otlp.enabled {
-            let endpoint = self.metrics.otlp.endpoint.trim();
-            if endpoint.is_empty() {
+            let endpoint = self.metrics.otlp.endpoint.as_str();
+            let normalized_endpoint = endpoint.trim();
+            if normalized_endpoint.is_empty() {
                 anyhow::bail!("metrics.otlp.endpoint cannot be empty when OTLP export is enabled");
             }
-            validate_otlp_endpoint(endpoint)?;
+            if endpoint != normalized_endpoint {
+                anyhow::bail!(
+                    "metrics.otlp.endpoint must not contain leading or trailing whitespace"
+                );
+            }
+            validate_otlp_endpoint(normalized_endpoint)?;
             if self.metrics.otlp.export_interval_ms == 0 {
                 anyhow::bail!("metrics.otlp.export_interval_ms must be greater than zero");
             }
@@ -1342,6 +1348,27 @@ endpoint = "udp://127.0.0.1:4318/v1/metrics"
         assert!(
             err.to_string().contains("must use http or https"),
             "unexpected unsupported-scheme error: {err}"
+        );
+    }
+
+    #[test]
+    fn otlp_endpoint_rejects_surrounding_whitespace() {
+        let parsed: AppConfig = toml::from_str(
+            r#"
+[metrics.otlp]
+enabled = true
+endpoint = " http://127.0.0.1:4318/v1/metrics "
+"#,
+        )
+        .expect("parse config with endpoint surrounding whitespace");
+
+        let err = parsed
+            .validate()
+            .expect_err("surrounding endpoint whitespace should be rejected");
+        assert!(
+            err.to_string()
+                .contains("must not contain leading or trailing whitespace"),
+            "unexpected whitespace validation error: {err}"
         );
     }
 
