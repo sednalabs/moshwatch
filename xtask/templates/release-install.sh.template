@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+PATH_BLOCK_START='@PATH_BLOCK_START@'
+PATH_BLOCK_END='@PATH_BLOCK_END@'
+
+RELEASE_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_BIN_DIR="$HOME/.local/share/moshwatch/bin"
+USER_BIN_DIR="$HOME/.local/bin"
+CONFIG_DIR="$HOME/.config/moshwatch"
+SYSTEMD_DIR="$HOME/.config/systemd/user"
+
+mkdir -p "$INSTALL_BIN_DIR" "$USER_BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR"
+
+install -m 0755 "$RELEASE_ROOT/bin/mosh-server-real" "$INSTALL_BIN_DIR/mosh-server-real"
+install -m 0755 "$RELEASE_ROOT/bin/moshwatchd" "$INSTALL_BIN_DIR/moshwatchd"
+install -m 0755 "$RELEASE_ROOT/bin/moshwatch" "$INSTALL_BIN_DIR/moshwatch"
+install -m 0755 "$RELEASE_ROOT/bin/moshwatch" "$USER_BIN_DIR/moshwatch"
+
+render_template() {
+    local source_file="$1"
+    local destination_file="$2"
+    local rendered_file
+    local line
+    rendered_file="$(mktemp "$(dirname -- "$destination_file")/.${destination_file##*/}.XXXXXX")"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        printf '%s\n' "${line//@INSTALL_BIN_DIR@/${INSTALL_BIN_DIR}}"
+    done < "$source_file" > "$rendered_file"
+    mv "$rendered_file" "$destination_file"
+}
+
+render_template "$RELEASE_ROOT/templates/mosh-server-wrapper.sh" "$USER_BIN_DIR/mosh-server"
+chmod 0755 "$USER_BIN_DIR/mosh-server"
+
+render_template "$RELEASE_ROOT/templates/moshwatchd.service" "$SYSTEMD_DIR/moshwatchd.service"
+chmod 0644 "$SYSTEMD_DIR/moshwatchd.service"
+
+path_file="$(mktemp "$CONFIG_DIR/.path.sh.XXXXXX")"
+cat > "$path_file" <<'EOF'
+# Added by moshwatch install. Keep ~/.local/bin ahead of system PATH so SSH-launched Mosh sessions resolve the wrapper.
+if [ -d "$HOME/.local/bin" ]; then
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) ;;
+        *) PATH="$HOME/.local/bin:$PATH" ;;
+    esac
+fi
+EOF
+mv "$path_file" "$CONFIG_DIR/path.sh"
+
+upsert_managed_block() {
+    local file_path="$1"
+    local placement="$2"
+    local tmp_file
+    local next_file
+    tmp_file="$(mktemp "$(dirname -- "$file_path")/.${file_path##*/}.XXXXXX")"
+    next_file="$(mktemp "$(dirname -- "$file_path")/.${file_path##*/}.next.XXXXXX")"
+
+    if [[ -f "$file_path" ]]; then
+        awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
+            BEGIN { skipping = 0; buffered_lines = 0 }
+            !skipping && $0 == start {
+                skipping = 1
+                buffered_lines = 0
+                buffered[buffered_lines++] = $0
+                next
+            }
+            skipping {
+                buffered[buffered_lines++] = $0
+                if ($0 == end) {
+                    skipping = 0
+                    buffered_lines = 0
+                }
+                next
+            }
+            { print }
+            END {
+                if (skipping) {
+                    for (idx = 0; idx < buffered_lines; idx++) {
+                        print buffered[idx]
+                    }
+                }
+            }
+        ' "$file_path" > "$tmp_file"
+    else
+        : > "$tmp_file"
+    fi
+
+    if [[ "$placement" == "prepend" ]]; then
+        if [[ -s "$tmp_file" ]]; then
+            {
+                printf '%s\n' "$PATH_BLOCK_START"
+                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
+                printf '%s\n' "$PATH_BLOCK_END"
+                printf '\n'
+                cat "$tmp_file"
+            } > "$next_file"
+        else
+            {
+                printf '%s\n' "$PATH_BLOCK_START"
+                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
+                printf '%s\n' "$PATH_BLOCK_END"
+            } > "$next_file"
+        fi
+    else
+        if [[ -s "$tmp_file" ]]; then
+            {
+                cat "$tmp_file"
+                printf '\n'
+                printf '%s\n' "$PATH_BLOCK_START"
+                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
+                printf '%s\n' "$PATH_BLOCK_END"
+            } > "$next_file"
+        else
+            {
+                printf '%s\n' "$PATH_BLOCK_START"
+                printf '[ -r "$HOME/.config/moshwatch/path.sh" ] && . "$HOME/.config/moshwatch/path.sh"\n'
+                printf '%s\n' "$PATH_BLOCK_END"
+            } > "$next_file"
+        fi
+    fi
+
+    if [[ -L "$file_path" ]]; then
+        # Write through the managed path so symlinked rc files keep the link itself.
+        cat "$next_file" > "$file_path"
+    else
+        mv "$next_file" "$file_path"
+    fi
+    rm -f "$tmp_file" "$next_file"
+}
+
+upsert_managed_block "$HOME/.bashrc" prepend
+upsert_managed_block "$HOME/.profile" append
+
+systemctl --user daemon-reload
+systemctl --user enable moshwatchd.service
+systemctl --user restart moshwatchd.service
