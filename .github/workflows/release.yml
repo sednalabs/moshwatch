@@ -133,7 +133,7 @@ jobs:
             -o cyclonedx-json=dist/release/moshwatch-${RELEASE_TAG}-mosh-server-real.cdx.json
 
       - name: Attest packaged mosh-server-real binary
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: dist/release/moshwatch-${{ github.ref_name }}-linux-x86_64/bin/mosh-server-real
 
@@ -164,7 +164,7 @@ jobs:
           retention-days: 14
 
       - name: Attest release assets
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: |
             dist/release/moshwatch-${{ github.ref_name }}-linux-x86_64.tar.gz
