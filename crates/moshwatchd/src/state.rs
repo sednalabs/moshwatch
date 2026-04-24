@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! In-memory session registry and merge policy.
 //!
@@ -219,6 +219,7 @@ impl ServiceState {
                 srtt_ms: event.srtt_ms,
                 retransmit_pct_10s: None,
                 remote_state_age_ms: event.remote_state_age_ms,
+                current_client_addr: entry.summary.peer.current_client_addr.clone(),
             },
         );
         upsert_counter_sample(

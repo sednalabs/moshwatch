@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 # Licensing
 
@@ -6,7 +6,7 @@
 
 ## First-party code
 
-The original code in these paths is licensed under GPL-3.0-or-later unless a
+The original code in these paths is licensed under AGPL-3.0-or-later unless a
 file explicitly states otherwise:
 
 - `crates/`
@@ -15,7 +15,7 @@ file explicitly states otherwise:
 - `systemd/`
 - root documentation files, unless they say otherwise
 
-The GPL-3.0-or-later license text is in [LICENSE](LICENSE).
+The AGPL-3.0-or-later license text is in [LICENSE](LICENSE).
 
 ## Vendored upstream code
 
@@ -29,21 +29,21 @@ Relevant upstream files:
 - [vendor/mosh/debian/copyright](vendor/mosh/debian/copyright)
 - [vendor/mosh/ocb-license.html](vendor/mosh/ocb-license.html)
 
-## Practical release boundary (GPL-oriented artifacts)
+## Practical release boundary (AGPL/GPL combined artifacts)
 
 Any packaged artifact that includes `mosh-server-real` also includes upstream
-Mosh code. Those artifacts should be released with GPLv3-or-later compliance
-as the controlling distribution posture for the bundle, while still preserving
-all upstream notices and exceptions.
+Mosh code. Those artifacts must preserve the first-party AGPL terms for
+`moshwatch` components and the upstream GPL-based Mosh terms, notices, and
+exceptions for the vendored Mosh components.
 
 For each binary release that includes `mosh-server-real`:
 
 - provide corresponding source for the exact released binaries, including local
   Mosh instrumentation changes and build scripts
 - include upstream Mosh license texts and notices from `vendor/mosh/`
-- keep first-party GPL notices (`LICENSE`, `NOTICE`) with the source tree and
+- keep first-party AGPL notices (`LICENSE`, `NOTICE`) with the source tree and
   release metadata
 - document modified upstream files and release commit references
 
 This policy is about release packaging obligations, not automatic relicensing
-of all source files in this repository.
+of vendored upstream source files in this repository.
