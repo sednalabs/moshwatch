@@ -315,13 +315,19 @@ async fn build_response(
             )
         }
         ("GET", "/v1/coherence/sessions") => {
-            let guard = context.state.read().await;
-            let export = guard.export_summaries(now_ms, MAX_EXPORTED_SESSIONS);
-            let reports = export
-                .sessions
+            let (export, session_snapshots) = {
+                let guard = context.state.read().await;
+                let export = guard.export_summaries(now_ms, MAX_EXPORTED_SESSIONS);
+                let session_snapshots = export
+                    .sessions
+                    .iter()
+                    .filter_map(|summary| guard.session_detail(&summary.session_id, now_ms))
+                    .collect::<Vec<_>>();
+                (export, session_snapshots)
+            };
+            let reports = session_snapshots
                 .iter()
-                .filter_map(|summary| guard.session_detail(&summary.session_id, now_ms))
-                .map(|session| build_coherence_session_report(&context.observer, &session))
+                .map(|session| build_coherence_session_report(&context.observer, session))
                 .collect();
             let response = ApiCoherenceSessionsResponse {
                 schema_version: API_SCHEMA_VERSION,
