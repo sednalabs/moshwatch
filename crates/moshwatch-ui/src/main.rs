@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Terminal UI for local `moshwatchd` snapshots and session controls.
 //!
@@ -1843,18 +1843,21 @@ mod tests {
                     srtt_ms: None,
                     retransmit_pct_10s: None,
                     remote_state_age_ms: None,
+                    current_client_addr: None,
                 },
                 MetricPoint {
                     unix_ms: 2,
                     srtt_ms: None,
                     retransmit_pct_10s: Some(0.8),
                     remote_state_age_ms: None,
+                    current_client_addr: None,
                 },
                 MetricPoint {
                     unix_ms: 3,
                     srtt_ms: None,
                     retransmit_pct_10s: Some(2.2),
                     remote_state_age_ms: None,
+                    current_client_addr: None,
                 },
             ],
         };
@@ -1966,18 +1969,21 @@ mod tests {
                     srtt_ms: Some(12.0),
                     retransmit_pct_10s: Some(1.0),
                     remote_state_age_ms: None,
+                    current_client_addr: None,
                 },
                 MetricPoint {
                     unix_ms: 4_000,
                     srtt_ms: Some(48.0),
                     retransmit_pct_10s: None,
                     remote_state_age_ms: None,
+                    current_client_addr: None,
                 },
                 MetricPoint {
                     unix_ms: 10_000,
                     srtt_ms: Some(33.0),
                     retransmit_pct_10s: Some(9.5),
                     remote_state_age_ms: None,
+                    current_client_addr: None,
                 },
             ],
         };

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Shared API, event-stream, and telemetry protocol contracts.
 //!
@@ -18,11 +18,18 @@
 //! * `docs/design/modularisation-and-boundaries.md`
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Version number for the exported API and event-stream schema.
 ///
 /// Bump this only when a consumer-visible contract changes.
-pub const API_SCHEMA_VERSION: u32 = 4;
+pub const API_SCHEMA_VERSION: u32 = 5;
+
+/// Version string for redacted coherence exports.
+pub const COHERENCE_EXPORT_VERSION: &str = "moshwatch-coherence-export-v1";
+
+/// Version string for the out-of-process adapter contract.
+pub const ADAPTER_CONTRACT_VERSION: &str = "moshwatch-adapter-contract-v1";
 
 /// Schema version implied by REST responses from daemons older than v4.
 pub const LEGACY_REST_SCHEMA_VERSION: u32 = 2;
@@ -136,6 +143,177 @@ pub struct MetricPoint {
     pub retransmit_pct_10s: Option<f64>,
     /// Remote-state age at this point, if known.
     pub remote_state_age_ms: Option<u64>,
+    /// Remote client address currently attached at this point, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_client_addr: Option<String>,
+}
+
+/// Redacted route epoch inferred from endpoint continuity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoherenceRouteEpoch {
+    /// Zero-based epoch index in chronological order.
+    pub epoch_index: usize,
+    /// First sample timestamp for this epoch.
+    pub start_unix_ms: i64,
+    /// Last sample timestamp for this epoch.
+    pub end_unix_ms: i64,
+    /// Number of samples represented by this epoch.
+    pub sample_count: usize,
+    /// Stable digest label for the endpoint, never the endpoint value itself.
+    pub endpoint_label: Option<String>,
+    /// Endpoint values are never retained in coherence exports.
+    pub endpoint_value_retained: bool,
+}
+
+/// Metadata-only continuity summary for one observed session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoherenceContinuitySummary {
+    pub stable_session_identity: bool,
+    pub route_epoch_count: usize,
+    pub route_shift_count: usize,
+    pub history_sample_count: usize,
+    pub max_sample_gap_ms: Option<i64>,
+    pub recovery_after_drift: bool,
+    pub liveness_signal_present: bool,
+    pub packet_counter_signal_present: bool,
+    pub retransmit_signal_present: bool,
+}
+
+/// Defensive adjudication over one coherence report.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoherenceAdjudication {
+    pub decision: String,
+    pub confidence_score: f64,
+    pub false_stitch_rejected: bool,
+    pub caveats: Vec<String>,
+}
+
+/// Hard privacy boundary carried with coherence exports.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoherenceSafetyBoundary {
+    pub defensive_observability_only: bool,
+    pub packet_payload_retained: bool,
+    pub raw_packet_capture_retained: bool,
+    pub session_keys_retained: bool,
+    pub terminal_content_retained: bool,
+    pub endpoint_values_redacted: bool,
+    pub application_semantics_inferred: bool,
+}
+
+/// Compact coherence status used in latest-state event frames.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoherenceSessionSnapshot {
+    pub session_id_label: String,
+    pub kind: SessionKind,
+    pub health: HealthState,
+    pub route_shift_observed: bool,
+    pub endpoint_values_retained: bool,
+    pub confidence_score: f64,
+}
+
+/// Full metadata-only coherence report for one session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoherenceSessionReport {
+    pub report_version: String,
+    pub observer_label: String,
+    pub session_id_label: String,
+    pub display_session_id_present: bool,
+    pub kind: SessionKind,
+    pub health: HealthState,
+    pub udp_port_observed: bool,
+    pub route_epochs: Vec<CoherenceRouteEpoch>,
+    pub continuity: CoherenceContinuitySummary,
+    pub adjudication: CoherenceAdjudication,
+    pub safety_boundary: CoherenceSafetyBoundary,
+}
+
+/// Response body for `GET /v1/coherence/sessions`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiCoherenceSessionsResponse {
+    #[serde(default = "default_rest_schema_version")]
+    pub schema_version: u32,
+    pub observer: crate::identity::ObserverInfo,
+    pub generated_at_unix_ms: i64,
+    pub total_sessions: usize,
+    pub truncated_session_count: usize,
+    pub sessions: Vec<CoherenceSessionReport>,
+}
+
+/// Response body for `GET /v1/coherence/sessions/:id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiCoherenceSessionResponse {
+    #[serde(default = "default_rest_schema_version")]
+    pub schema_version: u32,
+    pub observer: crate::identity::ObserverInfo,
+    pub generated_at_unix_ms: i64,
+    pub session: CoherenceSessionReport,
+}
+
+/// Redaction metadata for coherence exports.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoherenceRedactionProfile {
+    pub profile_id: String,
+    pub endpoint_values_retained: bool,
+    pub session_id_values_retained: bool,
+    pub observer_values_retained: bool,
+    pub packet_or_terminal_content_retained: bool,
+}
+
+/// Privacy and interpretation guarantees attached to a coherence export.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoherenceExportGuarantees {
+    pub packet_payload_retained: bool,
+    pub terminal_content_retained: bool,
+    pub session_keys_retained: bool,
+    pub endpoint_values_retained: bool,
+    pub application_semantics_inferred: bool,
+}
+
+/// Metadata-only export envelope for one coherence report.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoherenceExportEnvelope {
+    pub schema_version: u32,
+    pub export_version: String,
+    pub generated_at_unix_ms: i64,
+    pub observer_label: String,
+    pub session_id_label: String,
+    pub report: CoherenceSessionReport,
+    pub redaction: CoherenceRedactionProfile,
+    pub export_guarantees: CoherenceExportGuarantees,
+    pub export_digest: String,
+}
+
+/// Response body for `GET /v1/coherence/exports/:id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiCoherenceExportResponse {
+    #[serde(default = "default_rest_schema_version")]
+    pub schema_version: u32,
+    pub observer: crate::identity::ObserverInfo,
+    pub generated_at_unix_ms: i64,
+    pub export: CoherenceExportEnvelope,
+}
+
+/// One stable export surface available to out-of-process adapters.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdapterExportSurface {
+    pub surface_id: String,
+    pub route_template: String,
+    pub export_version: String,
+    pub privacy_profile: String,
+    pub description: String,
+    pub stable_for_external_adapters: bool,
+}
+
+/// Response body for `GET /v1/adapter/capabilities`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiAdapterCapabilitiesResponse {
+    #[serde(default = "default_rest_schema_version")]
+    pub schema_version: u32,
+    pub observer: crate::identity::ObserverInfo,
+    pub generated_at_unix_ms: i64,
+    pub adapter_contract_version: String,
+    pub daemon_loads_external_code: bool,
+    pub export_surfaces: Vec<AdapterExportSurface>,
 }
 
 /// Live peer state derived from verified telemetry.
@@ -224,6 +402,267 @@ impl SessionSummary {
             truncated_history_points,
             history,
         }
+    }
+}
+
+/// List stable out-of-process export surfaces.
+pub fn adapter_export_surfaces() -> Vec<AdapterExportSurface> {
+    vec![AdapterExportSurface {
+        surface_id: "coherence_export".to_string(),
+        route_template: "/v1/coherence/exports/{session_id}".to_string(),
+        export_version: COHERENCE_EXPORT_VERSION.to_string(),
+        privacy_profile: "metadata-only-redaction-v1".to_string(),
+        description: "Redacted route-continuity export for external diagnostics adapters."
+            .to_string(),
+        stable_for_external_adapters: true,
+    }]
+}
+
+/// Build a stable redacted label for identity-bearing values.
+pub fn stable_digest_label(value: &str, prefix: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let hex = format!("{digest:x}");
+    format!("{prefix}-{}", &hex[..12])
+}
+
+fn endpoint_label(value: Option<&str>) -> Option<String> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| stable_digest_label(value, "endpoint"))
+}
+
+fn observer_label(observer: &crate::identity::ObserverInfo) -> String {
+    stable_digest_label(
+        &format!("{}:{}", observer.node_name, observer.system_id),
+        "observer",
+    )
+}
+
+fn safety_boundary() -> CoherenceSafetyBoundary {
+    CoherenceSafetyBoundary {
+        defensive_observability_only: true,
+        packet_payload_retained: false,
+        raw_packet_capture_retained: false,
+        session_keys_retained: false,
+        terminal_content_retained: false,
+        endpoint_values_redacted: true,
+        application_semantics_inferred: false,
+    }
+}
+
+/// Build a compact redacted coherence status from a live session summary.
+pub fn build_coherence_snapshot_from_summary(summary: &SessionSummary) -> CoherenceSessionSnapshot {
+    let route_shift_observed = summary.peer.previous_client_addr.is_some()
+        && summary.peer.last_client_addr.is_some()
+        && summary.peer.client_addr_changed_at_unix_ms.is_some()
+        && summary.peer.previous_client_addr != summary.peer.last_client_addr;
+    let confidence_score = if summary.kind == SessionKind::Instrumented {
+        if route_shift_observed { 90.0 } else { 72.0 }
+    } else {
+        25.0
+    };
+    CoherenceSessionSnapshot {
+        session_id_label: stable_digest_label(&summary.session_id, "session"),
+        kind: summary.kind.clone(),
+        health: summary.health.clone(),
+        route_shift_observed,
+        endpoint_values_retained: false,
+        confidence_score,
+    }
+}
+
+/// Build a full metadata-only coherence report from one session snapshot.
+pub fn build_coherence_session_report(
+    observer: &crate::identity::ObserverInfo,
+    snapshot: &SessionSnapshot,
+) -> CoherenceSessionReport {
+    let summary = &snapshot.summary;
+    let mut points: Vec<(i64, Option<String>, bool, bool, bool)> = snapshot
+        .history
+        .iter()
+        .map(|point| {
+            (
+                point.unix_ms,
+                endpoint_label(point.current_client_addr.as_deref()),
+                point.remote_state_age_ms.is_some(),
+                point.srtt_ms.is_some() || point.retransmit_pct_10s.is_some(),
+                false,
+            )
+        })
+        .collect();
+    if points.is_empty() {
+        points.push((
+            summary.last_observed_unix_ms,
+            endpoint_label(
+                summary
+                    .peer
+                    .current_client_addr
+                    .as_deref()
+                    .or(summary.peer.last_client_addr.as_deref())
+                    .or(summary.client_addr.as_deref()),
+            ),
+            summary.metrics.last_heard_age_ms.is_some()
+                || summary.metrics.remote_state_age_ms.is_some(),
+            summary.metrics.srtt_ms.is_some()
+                || summary.metrics.last_rtt_ms.is_some()
+                || summary.metrics.retransmit_pct_10s.is_some()
+                || summary.metrics.retransmit_pct_60s.is_some(),
+            summary.metrics.packets_tx_total.is_some()
+                || summary.metrics.packets_rx_total.is_some(),
+        ));
+    }
+    points.sort_by_key(|point| point.0);
+
+    let mut route_epochs: Vec<CoherenceRouteEpoch> = Vec::new();
+    for (unix_ms, label, _, _, _) in &points {
+        match route_epochs.last_mut() {
+            Some(epoch) if epoch.endpoint_label == *label => {
+                epoch.end_unix_ms = *unix_ms;
+                epoch.sample_count += 1;
+            }
+            _ => {
+                route_epochs.push(CoherenceRouteEpoch {
+                    epoch_index: route_epochs.len(),
+                    start_unix_ms: *unix_ms,
+                    end_unix_ms: *unix_ms,
+                    sample_count: 1,
+                    endpoint_label: label.clone(),
+                    endpoint_value_retained: false,
+                });
+            }
+        }
+    }
+
+    let max_sample_gap_ms = points
+        .windows(2)
+        .map(|window| window[1].0.saturating_sub(window[0].0))
+        .max();
+    let history_sample_count = snapshot.history.len();
+    let route_shift_count = route_epochs.len().saturating_sub(1);
+    let liveness_signal_present = points.iter().any(|(_, _, liveness, _, _)| *liveness)
+        || summary.metrics.last_heard_age_ms.is_some()
+        || summary.metrics.remote_state_age_ms.is_some();
+    let packet_counter_signal_present = points.iter().any(|(_, _, _, _, packets)| *packets)
+        || summary.metrics.packets_tx_total.is_some()
+        || summary.metrics.packets_rx_total.is_some();
+    let retransmit_signal_present = summary.metrics.retransmit_pct_10s.is_some()
+        || summary.metrics.retransmit_pct_60s.is_some()
+        || snapshot
+            .history
+            .iter()
+            .any(|point| point.retransmit_pct_10s.is_some());
+    let stable_session_identity =
+        !summary.session_id.trim().is_empty() && summary.kind == SessionKind::Instrumented;
+    let recovery_after_drift = route_shift_count > 0
+        && liveness_signal_present
+        && (packet_counter_signal_present || summary.metrics.state_updates_rx_total.is_some());
+    let continuity = CoherenceContinuitySummary {
+        stable_session_identity,
+        route_epoch_count: route_epochs.len(),
+        route_shift_count,
+        history_sample_count,
+        max_sample_gap_ms,
+        recovery_after_drift,
+        liveness_signal_present,
+        packet_counter_signal_present,
+        retransmit_signal_present,
+    };
+    let confidence_score = coherence_confidence_score(&continuity, summary.udp_port.is_some());
+    let decision = if confidence_score >= 85.0 && route_shift_count > 0 {
+        "coherent_roaming_session_observed"
+    } else if confidence_score >= 70.0 {
+        "coherent_session_observed_without_roaming_claim"
+    } else {
+        "insufficient_coherence_signal"
+    };
+    let mut caveats = vec![
+        "metadata-only defensive observability".to_string(),
+        "does not retain Mosh session keys, packet contents, terminal content, or packet captures"
+            .to_string(),
+    ];
+    if route_shift_count == 0 {
+        caveats.push("no endpoint drift observed in the exported window".to_string());
+    }
+    CoherenceSessionReport {
+        report_version: "moshwatch-coherence-session-report-v1".to_string(),
+        observer_label: observer_label(observer),
+        session_id_label: stable_digest_label(&summary.session_id, "session"),
+        display_session_id_present: summary.display_session_id.is_some(),
+        kind: summary.kind.clone(),
+        health: summary.health.clone(),
+        udp_port_observed: summary.udp_port.is_some(),
+        route_epochs,
+        continuity,
+        adjudication: CoherenceAdjudication {
+            decision: decision.to_string(),
+            confidence_score,
+            false_stitch_rejected: true,
+            caveats,
+        },
+        safety_boundary: safety_boundary(),
+    }
+}
+
+fn coherence_confidence_score(
+    continuity: &CoherenceContinuitySummary,
+    udp_port_observed: bool,
+) -> f64 {
+    let mut score = 0.0;
+    if continuity.stable_session_identity {
+        score += 20.0;
+    }
+    if udp_port_observed {
+        score += 10.0;
+    }
+    if continuity.route_epoch_count >= 1 {
+        score += 10.0;
+    }
+    if continuity.route_shift_count >= 1 {
+        score += 20.0;
+    }
+    if continuity.recovery_after_drift {
+        score += 20.0;
+    }
+    if continuity.liveness_signal_present {
+        score += 10.0;
+    }
+    if continuity.packet_counter_signal_present {
+        score += 10.0;
+    }
+    score
+}
+
+/// Build a redacted metadata-only export envelope from one session report.
+pub fn build_coherence_export(
+    observer: &crate::identity::ObserverInfo,
+    generated_at_unix_ms: i64,
+    snapshot: &SessionSnapshot,
+) -> CoherenceExportEnvelope {
+    let report = build_coherence_session_report(observer, snapshot);
+    let digest_input = serde_json::to_vec(&report).expect("serialize coherence report");
+    let digest = Sha256::digest(&digest_input);
+    CoherenceExportEnvelope {
+        schema_version: API_SCHEMA_VERSION,
+        export_version: COHERENCE_EXPORT_VERSION.to_string(),
+        generated_at_unix_ms,
+        observer_label: report.observer_label.clone(),
+        session_id_label: report.session_id_label.clone(),
+        report,
+        redaction: CoherenceRedactionProfile {
+            profile_id: "metadata-only-redaction-v1".to_string(),
+            endpoint_values_retained: false,
+            session_id_values_retained: false,
+            observer_values_retained: false,
+            packet_or_terminal_content_retained: false,
+        },
+        export_guarantees: CoherenceExportGuarantees {
+            packet_payload_retained: false,
+            terminal_content_retained: false,
+            session_keys_retained: false,
+            endpoint_values_retained: false,
+            application_semantics_inferred: false,
+        },
+        export_digest: format!("{digest:x}"),
     }
 }
 
@@ -498,6 +937,9 @@ pub struct EventStreamFrame {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// Latest exported session set, for snapshot frames only.
     pub sessions: Option<Vec<SessionSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Redacted coherence status for snapshot frames only.
+    pub coherence_sessions: Option<Vec<CoherenceSessionSnapshot>>,
 }
 
 /// Raw telemetry payload sent by the instrumented `mosh-server-real`.
@@ -561,9 +1003,9 @@ mod tests {
 
     use super::{
         ApiConfigResponse, ApiHistoryResponse, ApiSessionControlResponse, ApiSessionResponse,
-        ApiSessionsResponse, HealthState, HistorySample, LEGACY_REST_SCHEMA_VERSION,
+        ApiSessionsResponse, HealthState, HistorySample, LEGACY_REST_SCHEMA_VERSION, MetricPoint,
         SessionControlAction, SessionKind, SessionMetrics, SessionPeerInfo, SessionSummary,
-        classify_health,
+        build_coherence_export, build_coherence_session_report, classify_health,
     };
     use crate::{
         config::{AppConfig, HealthThresholds},
@@ -719,6 +1161,70 @@ mod tests {
         };
         let encoded = serde_json::to_value(sample).expect("encode history sample");
         assert_eq!(encoded["counter_reset_unix_ms"], serde_json::json!(1_500));
+    }
+
+    #[test]
+    fn coherence_export_redacts_route_drift_and_keeps_privacy_guarantees() {
+        let mut summary = session_summary();
+        summary.peer.previous_client_addr = Some("198.51.100.9:60001".to_string());
+        summary.peer.current_client_addr = Some("203.0.113.7:62000".to_string());
+        summary.peer.last_client_addr = Some("203.0.113.7:62000".to_string());
+        summary.peer.client_addr_changed_at_unix_ms = Some(2_000);
+        summary.metrics.packets_tx_total = Some(10);
+        summary.metrics.packets_rx_total = Some(9);
+        let snapshot = summary.with_history(
+            2,
+            0,
+            vec![
+                MetricPoint {
+                    unix_ms: 1_000,
+                    srtt_ms: Some(18.0),
+                    retransmit_pct_10s: Some(0.0),
+                    remote_state_age_ms: Some(4),
+                    current_client_addr: Some("198.51.100.9:60001".to_string()),
+                },
+                MetricPoint {
+                    unix_ms: 2_000,
+                    srtt_ms: Some(22.0),
+                    retransmit_pct_10s: Some(0.5),
+                    remote_state_age_ms: Some(5),
+                    current_client_addr: Some("203.0.113.7:62000".to_string()),
+                },
+            ],
+        );
+
+        let report = build_coherence_session_report(&observer(), &snapshot);
+        assert_eq!(report.continuity.route_epoch_count, 2);
+        assert_eq!(report.continuity.route_shift_count, 1);
+        assert!(report.continuity.recovery_after_drift);
+        assert_eq!(
+            report.adjudication.decision,
+            "coherent_roaming_session_observed"
+        );
+        assert!(report.adjudication.confidence_score >= 90.0);
+        assert!(report.safety_boundary.defensive_observability_only);
+        assert!(!report.safety_boundary.packet_payload_retained);
+        assert!(!report.safety_boundary.raw_packet_capture_retained);
+        assert!(!report.safety_boundary.session_keys_retained);
+        assert!(
+            report
+                .route_epochs
+                .iter()
+                .all(|epoch| !epoch.endpoint_value_retained)
+        );
+
+        let export = build_coherence_export(&observer(), 3_000, &snapshot);
+        assert_eq!(export.export_version, super::COHERENCE_EXPORT_VERSION);
+        assert_eq!(export.export_digest.len(), 64);
+        assert!(!export.redaction.endpoint_values_retained);
+        assert!(!export.export_guarantees.packet_payload_retained);
+        assert!(!export.export_guarantees.application_semantics_inferred);
+        let serialized = serde_json::to_string(&export).expect("serialize coherence export");
+        assert!(!serialized.contains("198.51.100.9"));
+        assert!(!serialized.contains("203.0.113.7"));
+        assert!(!serialized.contains("instrumented:1000:42"));
+        assert!(!serialized.contains("node-1"));
+        assert!(!serialized.contains("system-1"));
     }
 
     #[test]

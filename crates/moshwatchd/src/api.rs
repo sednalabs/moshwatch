@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Local HTTP-over-Unix API and latest-state snapshot stream.
 //!
@@ -27,9 +27,12 @@ use std::{
 
 use anyhow::{Context, Result};
 use moshwatch_core::{
-    API_SCHEMA_VERSION, ApiConfigResponse, ApiHistoryResponse, ApiSessionControlResponse,
-    ApiSessionResponse, ApiSessionsResponse, EventStreamEvent, EventStreamFrame, ObserverInfo,
-    SessionControlAction, remove_socket_if_present, set_socket_owner_only,
+    ADAPTER_CONTRACT_VERSION, API_SCHEMA_VERSION, ApiAdapterCapabilitiesResponse,
+    ApiCoherenceExportResponse, ApiCoherenceSessionResponse, ApiCoherenceSessionsResponse,
+    ApiConfigResponse, ApiHistoryResponse, ApiSessionControlResponse, ApiSessionResponse,
+    ApiSessionsResponse, EventStreamEvent, EventStreamFrame, ObserverInfo, SessionControlAction,
+    adapter_export_surfaces, build_coherence_export, build_coherence_session_report,
+    build_coherence_snapshot_from_summary, remove_socket_if_present, set_socket_owner_only,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -76,6 +79,7 @@ impl SnapshotHub {
             truncated_session_count: Some(0),
             dropped_sessions_total: Some(0),
             sessions: Some(Vec::new()),
+            coherence_sessions: Some(Vec::new()),
         });
         Self {
             observer,
@@ -86,6 +90,11 @@ impl SnapshotHub {
 
     pub fn publish_snapshot(&self, export: ExportedSummaries, now_ms: i64) {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        let coherence_sessions = export
+            .sessions
+            .iter()
+            .map(build_coherence_snapshot_from_summary)
+            .collect();
         self.tx.send_replace(EventStreamFrame {
             schema_version: API_SCHEMA_VERSION,
             observer: self.observer.clone(),
@@ -96,6 +105,7 @@ impl SnapshotHub {
             truncated_session_count: Some(export.truncated_session_count),
             dropped_sessions_total: Some(export.dropped_sessions_total),
             sessions: Some(export.sessions),
+            coherence_sessions: Some(coherence_sessions),
         });
     }
 
@@ -118,6 +128,7 @@ impl SnapshotHub {
             truncated_session_count: None,
             dropped_sessions_total: None,
             sessions: None,
+            coherence_sessions: None,
         }
     }
 }
@@ -302,6 +313,96 @@ async fn build_response(
                 serde_json::to_vec(&response).context("encode sessions response")?,
                 "application/json",
             )
+        }
+        ("GET", "/v1/coherence/sessions") => {
+            let (export, session_snapshots) = {
+                let guard = context.state.read().await;
+                let export = guard.export_summaries(now_ms, MAX_EXPORTED_SESSIONS);
+                let session_snapshots = export
+                    .sessions
+                    .iter()
+                    .filter_map(|summary| guard.session_detail(&summary.session_id, now_ms))
+                    .collect::<Vec<_>>();
+                (export, session_snapshots)
+            };
+            let reports = session_snapshots
+                .iter()
+                .map(|session| build_coherence_session_report(&context.observer, session))
+                .collect();
+            let response = ApiCoherenceSessionsResponse {
+                schema_version: API_SCHEMA_VERSION,
+                observer: context.observer.clone(),
+                generated_at_unix_ms: now_ms,
+                total_sessions: export.total_sessions,
+                truncated_session_count: export.truncated_session_count,
+                sessions: reports,
+            };
+            (
+                200,
+                serde_json::to_vec(&response).context("encode coherence sessions response")?,
+                "application/json",
+            )
+        }
+        ("GET", "/v1/adapter/capabilities") => {
+            let response = ApiAdapterCapabilitiesResponse {
+                schema_version: API_SCHEMA_VERSION,
+                observer: context.observer.clone(),
+                generated_at_unix_ms: now_ms,
+                adapter_contract_version: ADAPTER_CONTRACT_VERSION.to_string(),
+                daemon_loads_external_code: false,
+                export_surfaces: adapter_export_surfaces(),
+            };
+            (
+                200,
+                serde_json::to_vec(&response).context("encode adapter capabilities response")?,
+                "application/json",
+            )
+        }
+        ("GET", _) if path.starts_with("/v1/coherence/sessions/") => {
+            let session_id = path.trim_start_matches("/v1/coherence/sessions/");
+            let guard = context.state.read().await;
+            if let Some(session) = guard.session_detail(session_id, now_ms) {
+                let response = ApiCoherenceSessionResponse {
+                    schema_version: API_SCHEMA_VERSION,
+                    observer: context.observer.clone(),
+                    generated_at_unix_ms: now_ms,
+                    session: build_coherence_session_report(&context.observer, &session),
+                };
+                (
+                    200,
+                    serde_json::to_vec(&response).context("encode coherence session response")?,
+                    "application/json",
+                )
+            } else {
+                (
+                    404,
+                    b"{\"error\":\"session not found\"}".to_vec(),
+                    "application/json",
+                )
+            }
+        }
+        ("GET", _) if path.starts_with("/v1/coherence/exports/") => {
+            let session_id = path.trim_start_matches("/v1/coherence/exports/");
+            let guard = context.state.read().await;
+            if let Some(session) = guard.session_detail(session_id, now_ms) {
+                let response = ApiCoherenceExportResponse {
+                    schema_version: API_SCHEMA_VERSION,
+                    observer: context.observer.clone(),
+                    generated_at_unix_ms: now_ms,
+                    export: build_coherence_export(&context.observer, now_ms, &session),
+                };
+                (
+                    200,
+                    serde_json::to_vec(&response).context("encode coherence export response")?,
+                    "application/json",
+                )
+            } else {
+                (
+                    404,
+                    b"{\"error\":\"session not found\"}".to_vec(),
+                    "application/json",
+                )
+            }
         }
         ("GET", "/v1/config") => {
             let guard = context.state.read().await;
@@ -690,6 +791,7 @@ mod tests {
     use moshwatch_core::{
         API_SCHEMA_VERSION, ApiAppConfig, ApiConfigResponse, AppConfig, EventStreamEvent,
         EventStreamFrame, ObserverInfo, TelemetryEvent, TelemetryEventKind,
+        build_coherence_snapshot_from_summary,
     };
     use tempfile::tempdir;
     use tokio::{
@@ -899,6 +1001,87 @@ mod tests {
             "192.0.2.1:60001"
         );
         assert_eq!(body["sessions"][0]["client_addr"], "192.0.2.1:60001");
+    }
+
+    #[tokio::test]
+    async fn adapter_capabilities_describe_out_of_process_exports() {
+        let tempdir = tempdir().expect("tempdir");
+        let socket_path = tempdir.path().join("api.sock");
+        let state = Arc::new(RwLock::new(ServiceState::new(AppConfig::default())));
+        let snapshots = SnapshotHub::new(observer());
+
+        let task = spawn_api(state, snapshots, None, &socket_path).await;
+        wait_for_socket(&socket_path).await;
+
+        let response = request(&socket_path, "/v1/adapter/capabilities").await;
+        task.abort();
+
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        let body = json_body(&response);
+        assert_eq!(
+            body["adapter_contract_version"],
+            "moshwatch-adapter-contract-v1"
+        );
+        assert_eq!(body["daemon_loads_external_code"], false);
+        assert_eq!(
+            body["export_surfaces"][0]["route_template"],
+            "/v1/coherence/exports/{session_id}"
+        );
+        assert_eq!(
+            body["export_surfaces"][0]["export_version"],
+            "moshwatch-coherence-export-v1"
+        );
+    }
+
+    #[tokio::test]
+    async fn coherence_export_redacts_endpoint_drift() {
+        let tempdir = tempdir().expect("tempdir");
+        let socket_path = tempdir.path().join("api.sock");
+        let state = Arc::new(RwLock::new(ServiceState::new(AppConfig::default())));
+        let snapshots = SnapshotHub::new(observer());
+        let session_id = instrumented_session_id(42, 1_000);
+        state
+            .write()
+            .await
+            .apply_telemetry(session_id.clone(), sample_event(2_000));
+        let mut roamed = sample_event(3_000);
+        roamed.client_addr = Some("198.51.100.9:62000".to_string());
+        roamed.packets_tx_total = Some(14);
+        roamed.packets_rx_total = Some(13);
+        state
+            .write()
+            .await
+            .apply_telemetry(session_id.clone(), roamed);
+
+        let task = spawn_api(state, snapshots, None, &socket_path).await;
+        wait_for_socket(&socket_path).await;
+
+        let response = request(&socket_path, &format!("/v1/coherence/exports/{session_id}")).await;
+        task.abort();
+
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        let body = json_body(&response);
+        let export = &body["export"];
+        assert_eq!(export["export_version"], "moshwatch-coherence-export-v1");
+        assert_eq!(export["schema_version"], API_SCHEMA_VERSION);
+        assert_eq!(
+            export["report"]["adjudication"]["decision"],
+            "coherent_roaming_session_observed"
+        );
+        assert_eq!(export["report"]["continuity"]["route_shift_count"], 1);
+        assert_eq!(
+            export["report"]["safety_boundary"]["packet_payload_retained"],
+            false
+        );
+        assert_eq!(
+            export["export_guarantees"]["packet_payload_retained"],
+            false
+        );
+        assert_eq!(export["redaction"]["endpoint_values_retained"], false);
+        let serialized_export = serde_json::to_string(export).expect("serialize export");
+        assert!(!serialized_export.contains("192.0.2.1"));
+        assert!(!serialized_export.contains("198.51.100.9"));
+        assert!(!serialized_export.contains(&session_id));
     }
 
     #[tokio::test]
@@ -1267,6 +1450,13 @@ mod tests {
             truncated_session_count: Some(0),
             dropped_sessions_total: Some(0),
             sessions: Some(exported.sessions.clone()),
+            coherence_sessions: Some(
+                exported
+                    .sessions
+                    .iter()
+                    .map(build_coherence_snapshot_from_summary)
+                    .collect(),
+            ),
         })
         .expect("serialize expected snapshot frame");
         snapshots.publish_snapshot(exported, 2_000);

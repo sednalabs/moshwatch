@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 # Contributing
 
@@ -35,6 +35,7 @@ Update documentation whenever a change affects:
 - runtime paths
 - socket locations or permissions
 - API endpoints or response fields
+- adapter export surfaces, coherence reports, or redaction guarantees
 - observer identity fields, schema versions, or attribution behavior
 - Prometheus metrics or auth requirements
 - config fields, defaults, validation, or security posture
@@ -141,7 +142,7 @@ diff and update [SECURITY.md](SECURITY.md).
 
 ## Releases And Licensing
 
-First-party `moshwatch` source is GPL-3.0-or-later unless a file states
+First-party `moshwatch` source is AGPL-3.0-or-later unless a file states
 otherwise. The vendored `vendor/mosh/` subtree keeps upstream Mosh licenses and
 notices.
 
@@ -152,6 +153,23 @@ released binaries (including local instrumentation changes and build inputs).
 Maintainers cut signed annotated `vX.Y.Z` tags that point at the release
 commit, GitHub Actions creates a draft release, and maintainers publish the
 draft after review.
+
+## Local Publication-Policy Hooks
+
+Before pushing public branches, enable the checked-in local hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hooks run `scripts/check-publication-policy.sh` at commit and push time.
+They keep this repository product-neutral by checking public-facing files
+against maintainer-configured local publication policy patterns. The pattern
+file is local operator configuration rather than tracked repository content;
+maintainers can place it at
+`.git/info/moshwatch-publication-policy-patterns.txt`, set
+`MOSHWATCH_PUBLICATION_POLICY_PATTERNS`, or use
+`~/.config/moshwatch/publication-policy-patterns.txt`.
 
 Keep the generated release-note inputs in sync with the release workflow so the
 draft notes stay scoped to the intended tag range and release categories.

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 # Security Policy
 
@@ -51,6 +51,7 @@ In practice that means:
 - full host compromise
 - raw network forensics or packet capture
 - multi-tenant policy enforcement beyond its own local files and sockets
+- cryptographic proof that endpoint drift belongs to an authorized user
 
 The most important residual limitation is this:
 
@@ -129,6 +130,18 @@ sensitive enough to redact in public reports.
 Persisted history is treated as untrusted local input on read. Malformed lines
 and samples with invalid identity or metric fields are skipped or normalized
 before they can be replayed through the API.
+
+### Coherence exports
+
+Coherence reports are metadata-only route-continuity summaries for already
+tracked sessions. They are intended to help operators and downstream diagnostic
+tools distinguish internally coherent Mosh roaming from weak or incomplete
+signals, without retaining packet payloads, terminal content, raw packet
+captures, session keys, or raw endpoint values.
+
+Treat coherence confidence scores as advisory observability output. They do not
+replace authentication, authorization, host integrity, or incident-response
+review, and they should not be used as the sole basis for granting access.
 
 If you intentionally bind metrics off loopback, you must opt in with either:
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 pub mod config;
 pub mod identity;
@@ -17,9 +17,17 @@ pub use observability::{
     metric_descriptor,
 };
 pub use protocol::{
-    API_SCHEMA_VERSION, ApiAppConfig, ApiConfigResponse, ApiHistoryResponse, ApiMetricsConfig,
-    ApiSessionControlResponse, ApiSessionResponse, ApiSessionsResponse, EventStreamEvent,
-    EventStreamFrame, HealthState, HistorySample, MetricPoint, RetransmitWindowBreakdown,
-    SessionControlAction, SessionKind, SessionMetrics, SessionPeerInfo, SessionSnapshot,
-    SessionSummary, TelemetryEvent, TelemetryEventKind, classify_health,
+    ADAPTER_CONTRACT_VERSION, API_SCHEMA_VERSION, AdapterExportSurface,
+    ApiAdapterCapabilitiesResponse, ApiAppConfig, ApiCoherenceExportResponse,
+    ApiCoherenceSessionResponse, ApiCoherenceSessionsResponse, ApiConfigResponse,
+    ApiHistoryResponse, ApiMetricsConfig, ApiSessionControlResponse, ApiSessionResponse,
+    ApiSessionsResponse, COHERENCE_EXPORT_VERSION, CoherenceAdjudication,
+    CoherenceContinuitySummary, CoherenceExportEnvelope, CoherenceExportGuarantees,
+    CoherenceRedactionProfile, CoherenceRouteEpoch, CoherenceSafetyBoundary,
+    CoherenceSessionReport, CoherenceSessionSnapshot, EventStreamEvent, EventStreamFrame,
+    HealthState, HistorySample, MetricPoint, RetransmitWindowBreakdown, SessionControlAction,
+    SessionKind, SessionMetrics, SessionPeerInfo, SessionSnapshot, SessionSummary, TelemetryEvent,
+    TelemetryEventKind, adapter_export_surfaces, build_coherence_export,
+    build_coherence_session_report, build_coherence_snapshot_from_summary, classify_health,
+    stable_digest_label,
 };

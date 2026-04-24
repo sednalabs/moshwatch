@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 # moshwatch
 
@@ -16,7 +16,8 @@ upstream Mosh in `vendor/mosh/` only to build the instrumented
 `mosh-server-real` used by the local observer.
 
 `moshwatch` is not a fleet product, packet sniffer, or public monitoring service.
-It is a local operator tool.
+It is a local operator tool. External integrations should consume its bounded
+local exports instead of turning the daemon into a remote agent.
 
 ## Components
 
@@ -316,6 +317,12 @@ Available endpoints:
   Current daemon config.
 - `GET /v1/events/stream`
   Stable NDJSON event stream.
+- `GET /v1/adapter/capabilities`
+  Machine-readable list of stable out-of-process export surfaces.
+- `GET /v1/coherence/sessions`
+  Redacted route-continuity reports for currently tracked sessions.
+- `GET /v1/coherence/exports/{session_id}`
+  Metadata-only route-continuity export for one session.
 - `GET /metrics`
   Local Prometheus exposition over the Unix socket.
 
@@ -381,6 +388,49 @@ current daemon host.
 If a persisted history line is malformed or contains corrupted fields outside
 normal runtime bounds, `moshwatch` skips that sample rather than replaying it
 back through the API unchanged.
+
+### Adapter Boundary
+
+`moshwatchd` supports out-of-process adapters through stable JSON exports. The
+daemon does not load third-party code, execute adapter hooks, or call external
+commands from the API path.
+
+Adapters should first read:
+
+```text
+GET /v1/adapter/capabilities
+```
+
+and then consume one of the advertised export routes, such as:
+
+```text
+GET /v1/coherence/exports/{session_id}
+```
+
+The coherence export uses `moshwatch-coherence-export-v1` and carries a
+metadata-only redaction profile. Endpoint values, observer values, session id
+values, packet contents, terminal content, packet captures, and session keys
+are not retained in that export.
+
+### Coherence Reports And Roaming Signals
+
+Coherence reports are designed to help local operators and external diagnostic
+adapters reason about route continuity for a tracked Mosh session. They can
+show that a session kept a stable redacted identity label while endpoint
+metadata shifted, and that liveness or packet-counter signals remained
+continuous across the observed window.
+
+Those reports are diagnostic signals, not authentication. A high confidence
+score means the exported metadata is internally coherent for the observed
+session; it is not a cryptographic proof of user identity, a packet-forensic
+reconstruction, or a general statement that a session is authorized. Consumers
+should combine coherence reports with their normal access-control,
+host-integrity, and audit signals.
+
+The redaction boundary is part of the contract. Coherence exports intentionally
+avoid retaining packet payloads, terminal content, raw packet captures, session
+keys, and raw endpoint values so they can be shared with diagnostic tooling
+without becoming a sensitive-content archive.
 
 ### `/v1/events/stream` Notes
 
@@ -776,13 +826,13 @@ validation before publishing a draft GitHub Release.
 
 ## Licensing And Releases
 
-First-party `moshwatch` code is licensed under GPL-3.0-or-later unless a file
+First-party `moshwatch` code is licensed under AGPL-3.0-or-later unless a file
 states otherwise. The repository also vendors upstream Mosh in `vendor/mosh/`,
 which keeps its upstream licenses and notices.
 
 If you publish artifacts that include `mosh-server-real`, publish complete
 corresponding source for the exact binaries and preserve both the repository
-license texts and the upstream Mosh notices shipped in `vendor/mosh/`.
+AGPL license texts and the upstream Mosh notices shipped in `vendor/mosh/`.
 
 Tagged `vX.Y.Z` releases are automated through GitHub Actions. Release tags
 must be signed annotated tags that point at the commit being packaged. The
