@@ -16,7 +16,8 @@ upstream Mosh in `vendor/mosh/` only to build the instrumented
 `mosh-server-real` used by the local observer.
 
 `moshwatch` is not a fleet product, packet sniffer, or public monitoring service.
-It is a local operator tool.
+It is a local operator tool. External integrations should consume its bounded
+local exports instead of turning the daemon into a remote agent.
 
 ## Components
 
@@ -410,6 +411,26 @@ The coherence export uses `moshwatch-coherence-export-v1` and carries a
 metadata-only redaction profile. Endpoint values, observer values, session id
 values, packet contents, terminal content, packet captures, and session keys
 are not retained in that export.
+
+### Coherence Reports And Roaming Signals
+
+Coherence reports are designed to help local operators and external diagnostic
+adapters reason about route continuity for a tracked Mosh session. They can
+show that a session kept a stable redacted identity label while endpoint
+metadata shifted, and that liveness or packet-counter signals remained
+continuous across the observed window.
+
+Those reports are diagnostic signals, not authentication. A high confidence
+score means the exported metadata is internally coherent for the observed
+session; it is not a cryptographic proof of user identity, a packet-forensic
+reconstruction, or a general statement that a session is authorized. Consumers
+should combine coherence reports with their normal access-control,
+host-integrity, and audit signals.
+
+The redaction boundary is part of the contract. Coherence exports intentionally
+avoid retaining packet payloads, terminal content, raw packet captures, session
+keys, and raw endpoint values so they can be shared with diagnostic tooling
+without becoming a sensitive-content archive.
 
 ### `/v1/events/stream` Notes
 

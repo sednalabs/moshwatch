@@ -35,6 +35,7 @@ Update documentation whenever a change affects:
 - runtime paths
 - socket locations or permissions
 - API endpoints or response fields
+- adapter export surfaces, coherence reports, or redaction guarantees
 - observer identity fields, schema versions, or attribution behavior
 - Prometheus metrics or auth requirements
 - config fields, defaults, validation, or security posture
