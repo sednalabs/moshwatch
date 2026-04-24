@@ -639,7 +639,7 @@ pub fn build_coherence_export(
     snapshot: &SessionSnapshot,
 ) -> CoherenceExportEnvelope {
     let report = build_coherence_session_report(observer, snapshot);
-    let digest_input = serde_json::to_vec(&report).unwrap_or_default();
+    let digest_input = serde_json::to_vec(&report).expect("serialize coherence report");
     let digest = Sha256::digest(&digest_input);
     CoherenceExportEnvelope {
         schema_version: API_SCHEMA_VERSION,
