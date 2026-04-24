@@ -412,7 +412,7 @@ pub fn adapter_export_surfaces() -> Vec<AdapterExportSurface> {
         route_template: "/v1/coherence/exports/{session_id}".to_string(),
         export_version: COHERENCE_EXPORT_VERSION.to_string(),
         privacy_profile: "metadata-only-redaction-v1".to_string(),
-        description: ("Redacted route-continuity export for external diagnostics adapters.")
+        description: "Redacted route-continuity export for external diagnostics adapters."
             .to_string(),
         stable_for_external_adapters: true,
     }]
