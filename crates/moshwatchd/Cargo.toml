@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-libc = "0.2.177"
+libc = "0.2.186"
 moshwatch-core = { path = "../moshwatch-core" }
 opentelemetry-proto.workspace = true
 prost.workspace = true
