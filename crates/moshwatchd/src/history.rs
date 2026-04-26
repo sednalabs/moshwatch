@@ -319,6 +319,14 @@ impl HistoryStore {
         // the current day plus the previous `N - 1` buckets.
         let oldest_day = day_bucket(recorded_at_unix_ms) - self.retention_days as i64 + 1;
         let mut removed_bytes = 0u64;
+        let base_dir = match fs::canonicalize(&self.dir) {
+            Ok(base_dir) => base_dir,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("canonicalize history dir {}", self.dir.display()));
+            }
+        };
         let entries = match fs::read_dir(&self.dir) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -333,6 +341,12 @@ impl HistoryStore {
                 Err(_) => continue,
             };
             let path = entry.path();
+            let Ok(path) = fs::canonicalize(&path) else {
+                continue;
+            };
+            if !path.starts_with(&base_dir) {
+                continue;
+            }
             let Some(day) = file_day_bucket(&path) else {
                 continue;
             };
