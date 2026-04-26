@@ -31,6 +31,18 @@ Older versions may be closed out with upgrade guidance instead of a backport.
 - host attribution should be explicit for observability consumers, but easy to
   redact before public sharing
 
+## Automated Security Scanning
+
+The maintained CodeQL setup is checked in at `.github/workflows/codeql.yml` and
+`.github/codeql/codeql-config.yml`. It uses advanced setup so the repository's
+Actions, Rust, and vendored C/C++ source coverage is reviewable in the same
+diffs as the rest of CI.
+
+The CodeQL config runs the broad `security-and-quality` query suite and enables
+the local threat model where CodeQL supports it. Pull requests restore Rust
+dependency caches but do not write them; cache saves are limited to trusted
+`main` runs.
+
 In practice that means:
 
 - telemetry comes from a verified Unix stream peer

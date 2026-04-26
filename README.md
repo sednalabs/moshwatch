@@ -807,6 +807,12 @@ The same validation set is encoded in
 validation workflow, and the tagged release workflow reuses that same
 validation before publishing a draft GitHub Release.
 
+[`CodeQL Advanced`](.github/workflows/codeql.yml) is the checked-in code
+scanning setup. It analyzes GitHub Actions, the Rust workspace, and the
+vendored C/C++ Mosh source with the broad `security-and-quality` query suite.
+Rust dependency caches are restore-only for pull requests and write only from
+trusted `main` runs.
+
 ## Repository Layout
 
 - `crates/moshwatch-core`

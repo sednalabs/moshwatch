@@ -104,6 +104,11 @@ GitHub Actions runs the same validation through the reusable
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) wrapper, and tagged
 releases reuse that validation before the draft release is created.
 
+The repository also keeps its advanced CodeQL setup checked in at
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml). Treat generated
+or default-setup CodeQL workflows as duplicates once the checked-in advanced
+workflow is green.
+
 To rehearse the release packaging locally before cutting a tag, run:
 
 ```bash

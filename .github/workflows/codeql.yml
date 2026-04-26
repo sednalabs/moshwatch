@@ -1,0 +1,126 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "47 8 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-advanced-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: c-cpp
+            build-mode: none
+          - language: rust
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchains for CodeQL
+        if: ${{ matrix.language == 'rust' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          toolchains = {}
+          for path in sorted(Path(".").glob("**/rust-toolchain*")):
+              text = path.read_text(encoding="utf-8").strip()
+              if text.startswith("["):
+                  data = tomllib.loads(text)
+                  toolchain = data["toolchain"]
+                  channel = toolchain["channel"]
+                  components = set(toolchain.get("components", []))
+              else:
+                  channel = text
+                  components = set()
+              components.add("rust-src")
+              toolchains.setdefault(channel, set()).update(components)
+
+          if not toolchains:
+              toolchains["stable"] = {"rust-src"}
+
+          for channel, components in sorted(toolchains.items()):
+              command = [
+                  "rustup",
+                  "toolchain",
+                  "install",
+                  channel,
+                  "--profile",
+                  "minimal",
+                  "--no-self-update",
+              ]
+              for component in sorted(components):
+                  command.extend(["--component", component])
+              subprocess.run(command, check=True)
+          PY
+
+      - name: Restore Rust dependency cache for CodeQL
+        if: ${{ matrix.language == 'rust' }}
+        id: cache_codeql_rust_cargo_home_restore
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: codeql-rust-cargo-home-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            codeql-rust-cargo-home-v1-${{ runner.os }}-
+
+      - name: Prefetch Rust dependencies for CodeQL
+        if: ${{ matrix.language == 'rust' }}
+        continue-on-error: true
+        shell: bash
+        run: cargo fetch --locked --manifest-path Cargo.toml
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
+
+      - name: Save Rust dependency cache for CodeQL
+        if: ${{ always() && !cancelled() && matrix.language == 'rust' && steps.cache_codeql_rust_cargo_home_restore.outputs.cache-hit != 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: codeql-rust-cargo-home-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}
