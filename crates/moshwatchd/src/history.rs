@@ -296,6 +296,12 @@ impl HistoryStore {
                 Err(_) => continue,
             };
             let path = entry.path();
+            // Defense-in-depth: only operate on direct children of `dir`.
+            // This ensures filesystem operations below never receive a path
+            // outside the expected history directory.
+            if path.parent() != Some(dir.as_path()) || path.file_name().is_none() {
+                continue;
+            }
             let Some(day) = file_day_bucket(&path) else {
                 continue;
             };
