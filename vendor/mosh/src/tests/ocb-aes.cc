@@ -65,7 +65,6 @@ typedef shared::shared_ptr< AlignedBuffer > AlignedPointer;
 
 static AlignedBuffer *get_ctx( const AlignedBuffer &key ) {
   AlignedBuffer *ctx_buf = new AlignedBuffer( ae_ctx_sizeof() );
-  fatal_assert( ctx_buf );
   fatal_assert( AE_SUCCESS == ae_init( (ae_ctx *)ctx_buf->data(), key.data(), key.len(), NONCE_LEN, TAG_LEN ) );
   return ctx_buf;
 }
