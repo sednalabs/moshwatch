@@ -410,9 +410,9 @@ mod tests {
     fn normalize_proc_exe_path_strips_deleted_suffix() {
         assert_eq!(
             normalize_proc_exe_path(PathBuf::from(
-                "/home/grant/.local/share/moshwatch/bin/mosh-server-real (deleted)"
+                "/opt/moshwatch/bin/mosh-server-real (deleted)"
             )),
-            PathBuf::from("/home/grant/.local/share/moshwatch/bin/mosh-server-real")
+            PathBuf::from("/opt/moshwatch/bin/mosh-server-real")
         );
         assert_eq!(
             normalize_proc_exe_path(PathBuf::from("/usr/bin/mosh-server (deleted)")),
