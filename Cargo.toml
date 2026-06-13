@@ -20,7 +20,7 @@ clap = { version = "4.6.0", features = ["derive"] }
 crossterm = "0.29.0"
 directories = "6.0.0"
 http = "1.4.0"
-opentelemetry-proto = { version = "0.31.0", features = ["metrics", "gen-tonic-messages"] }
+opentelemetry-proto = { version = "0.32.0", features = ["metrics", "gen-tonic-messages"] }
 prost = "0.14.3"
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls"] }
 ratatui = "0.30.0"
