@@ -52,7 +52,7 @@ jobs:
           rustc --version
           cargo --version
 
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Format check
         run: cargo fmt --all --check
@@ -95,7 +95,7 @@ jobs:
           rustc --version
           cargo --version
 
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Check generated observability docs
         run: cargo run --locked -p xtask -- check-observability-docs
@@ -136,7 +136,7 @@ jobs:
           rustc --version
           cargo --version
 
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Build instrumented artifacts
         run: cargo run --locked -p xtask -- build
