@@ -327,6 +327,14 @@ impl HistoryStore {
                     .with_context(|| format!("read history dir {}", self.dir.display()));
             }
         };
+        let history_dir_canon = match self.dir.canonicalize() {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("canonicalize history dir {}", self.dir.display()));
+            }
+        };
         for entry in entries {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -342,8 +350,19 @@ impl HistoryStore {
             if !metadata.file_type().is_file() {
                 continue;
             }
+            let Ok(path_canon) = path.canonicalize() else {
+                continue;
+            };
+            if !path_canon.starts_with(&history_dir_canon) {
+                self.prune_failures_total.fetch_add(1, Ordering::Relaxed);
+                tracing::warn!(
+                    path = %path.display(),
+                    "skipping prune for history file outside history dir"
+                );
+                continue;
+            }
             if day < oldest_day
-                && let Err(error) = fs::remove_file(&path)
+                && let Err(error) = fs::remove_file(&path_canon)
             {
                 self.prune_failures_total.fetch_add(1, Ordering::Relaxed);
                 tracing::warn!(
