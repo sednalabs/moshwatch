@@ -105,7 +105,15 @@ jobs:
 
   build:
     if: ${{ !inputs.docs_only }}
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target_arch: x86_64
+          - runner: ubuntu-24.04-arm
+            target_arch: aarch64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -153,9 +161,26 @@ jobs:
         run: git -c tag.gpgSign=false -c tag.forceSignAnnotated=false tag -f "${{ steps.release-tag.outputs.tag }}" HEAD
 
       - name: Package release assets
-        run: cargo run --locked -p xtask -- package-release --tag "${{ steps.release-tag.outputs.tag }}"
+        run: |
+          cargo run --locked -p xtask -- package-release \
+            --tag "${{ steps.release-tag.outputs.tag }}" \
+            --target-os linux \
+            --target-arch "${{ matrix.target_arch }}"
+
+      - name: Upload prerelease assets
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: prerelease-${{ github.sha }}-linux-${{ matrix.target_arch }}
+          path: |
+            dist/release/moshwatch-${{ steps.release-tag.outputs.tag }}-linux-${{ matrix.target_arch }}.tar.gz
+            dist/release/moshwatch-${{ steps.release-tag.outputs.tag }}-source.tar.gz
+            dist/release/moshwatch-${{ steps.release-tag.outputs.tag }}-mosh-server-real-build-info.json
+            dist/release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload dist/bin artifact
+        if: matrix.target_arch == 'x86_64'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: dist-bin-${{ github.sha }}

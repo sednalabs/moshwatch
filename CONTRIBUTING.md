@@ -115,6 +115,11 @@ To rehearse the release packaging locally before cutting a tag, run:
 cargo run --locked -p xtask -- package-release --tag vX.Y.Z
 ```
 
+Non-docs CI packages prerelease candidates on native GitHub-hosted x86-64 and
+aarch64 Linux runners. Each architecture-specific workflow artifact contains
+the installable tarball, exact source, build metadata, and `SHA256SUMS`; it is
+retained for seven days and does not create or update a GitHub Release.
+
 For install, service, wrapper, metrics, API, or runtime-path changes, also run:
 
 ```bash

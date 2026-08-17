@@ -876,6 +876,23 @@ Maintainers still review and publish the draft release after the workflow
 finishes. GitHub's generated release notes are used, with the checked-in
 release-note configuration and tag range defining what appears in the draft.
 
+Every non-docs CI run also packages short-lived prerelease bundles natively on
+GitHub-hosted Linux x86-64 and aarch64 runners. The workflow artifacts are named
+`prerelease-<commit>-linux-x86_64` and
+`prerelease-<commit>-linux-aarch64`; each contains the matching installable
+tarball, exact source, build metadata, and `SHA256SUMS`. These seven-day CI
+artifacts are review candidates, not published GitHub Releases.
+
+After downloading and extracting the workflow artifact for the target host,
+verify and install it with:
+
+```bash
+sha256sum --check SHA256SUMS
+tar -xzf moshwatch-vX.Y.Z-linux-$(uname -m).tar.gz
+cd "moshwatch-vX.Y.Z-linux-$(uname -m)"
+./install.sh
+```
+
 To dry-run the same packaging path locally before tagging, run:
 
 ```bash
