@@ -1,0 +1,39 @@
+name: mosh-v3-crypto
+
+on:
+  push:
+    branches:
+      - experiment/mosh-v3-crypto
+    paths:
+      - experiments/mosh-v3/**
+      - docs/mosh-v3-transport-crypto.md
+      - .github/workflows/mosh-v3-crypto.yml
+  pull_request:
+    paths:
+      - experiments/mosh-v3/**
+      - docs/mosh-v3-transport-crypto.md
+      - .github/workflows/mosh-v3-crypto.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prototype:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install crypto build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libssl-dev
+
+      - name: Compile with warnings as errors
+        run: |
+          c++ -std=c++11 -Wall -Wextra -Werror -pedantic \
+            experiments/mosh-v3/crypto_v3.cc \
+            experiments/mosh-v3/crypto_v3_test.cc \
+            -lcrypto -o /tmp/mosh-v3-crypto-test
+
+      - name: Run Mosh v3 crypto prototype tests
+        run: /tmp/mosh-v3-crypto-test
