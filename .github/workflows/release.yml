@@ -18,7 +18,7 @@ jobs:
     with:
       docs_only: false
 
-  release:
+  publish-release:
     needs: validate
     runs-on: ubuntu-latest
     permissions:
@@ -132,7 +132,7 @@ jobs:
             "file:${stage_dir}/bin/mosh-server-real" \
             --source-name mosh-server-real \
             --source-version "$RELEASE_TAG" \
-            -o cyclonedx-json=dist/release/moshwatch-${RELEASE_TAG}-mosh-server-real.cdx.json
+            -o "cyclonedx-json=dist/release/moshwatch-${RELEASE_TAG}-mosh-server-real.cdx.json"
 
       - name: Attest packaged mosh-server-real binary
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
@@ -171,6 +171,11 @@ jobs:
           subject-path: |
             dist/release/moshwatch-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/release/moshwatch-${{ github.ref_name }}-source.tar.gz
+            dist/release/SHA256SUMS
+            dist/release/moshwatch-${{ github.ref_name }}-mosh-server-real-build-info.json
+            dist/release/moshwatch-${{ github.ref_name }}-moshwatchd.cdx.json
+            dist/release/moshwatch-${{ github.ref_name }}-moshwatch-ui.cdx.json
+            dist/release/moshwatch-${{ github.ref_name }}-mosh-server-real.cdx.json
 
       - name: Publish draft release
         shell: bash
