@@ -77,6 +77,7 @@ public:
   TrafficSecret &operator=(const TrafficSecret &) = delete;
 
   TrafficKey derive_key() const;
+  TrafficSecret next() const;
   void advance();
   bool valid() const { return valid_; }
 
@@ -89,6 +90,52 @@ private:
 struct InitialSecrets {
   TrafficSecret client_to_server;
   TrafficSecret server_to_client;
+};
+
+enum class EndpointRole { Client, Server };
+
+struct OpenResult {
+  Header header;
+  std::vector<unsigned char> plaintext;
+};
+
+class EpochSession {
+public:
+  EpochSession(EndpointRole role, InitialSecrets initial);
+  ~EpochSession() = default;
+  EpochSession(EpochSession &&other) noexcept = default;
+  EpochSession &operator=(EpochSession &&other) noexcept = default;
+  EpochSession(const EpochSession &) = delete;
+  EpochSession &operator=(const EpochSession &) = delete;
+
+  std::vector<unsigned char> seal(uint64_t packet_seq,
+                                  const unsigned char *plaintext,
+                                  std::size_t plaintext_len);
+  OpenResult open(const unsigned char *datagram, std::size_t datagram_len);
+
+  bool can_rekey_send() const;
+  void rekey_send();
+  void discard_previous_receive_key();
+
+  uint32_t send_epoch() const { return send_epoch_; }
+  uint32_t receive_epoch() const { return receive_epoch_; }
+  uint32_t peer_acknowledged_send_epoch() const { return peer_ack_epoch_; }
+  uint64_t packets_in_send_epoch() const { return packets_in_send_epoch_; }
+
+private:
+  TrafficSecret send_secret_;
+  TrafficKey send_key_;
+  uint32_t send_epoch_;
+  uint32_t peer_ack_epoch_;
+  uint64_t packets_in_send_epoch_;
+
+  TrafficSecret receive_secret_;
+  TrafficKey receive_key_;
+  TrafficKey previous_receive_key_;
+  uint32_t receive_epoch_;
+  bool previous_receive_key_valid_;
+
+  void note_authenticated_ack(uint32_t ack_epoch);
 };
 
 std::array<unsigned char, BOOTSTRAP_LEN> generate_bootstrap();
